@@ -92,19 +92,31 @@ add_action('plugins_loaded', function () {
                 $this->init_settings();
 
                 // Define user set variables.
-                $this->title              = $this->get_option('title');
-                $this->description        = $this->get_option('description');
-                $this->instructions       = $this->get_option('instructions');
-                $this->enable_for_methods = $this->get_option('enable_for_methods', array());
-                $this->enable_for_virtual = $this->get_option('enable_for_virtual', 'yes') === 'yes';
-                $this->sign               = $this->get_option('signature', md5(rand(12, 999)));
-                $this->enable_reversal    = $this->get_option('enable_reversal', 'no') === 'yes';
-                $this->enable_c2b         = $this->get_option('enable_c2b', 'no') === 'yes';
-                $this->enable_bonga       = $this->get_option('enable_bonga', 'no') === 'yes';
-                $this->debug              = $this->get_option('debug', 'no') === 'yes';
-                $this->shortcode          = $this->get_option('shortcode');
-                $this->type               = $this->get_option('type', 4);
-                $this->env                = $this->get_option('env', 'sandbox');
+                $this->title                    = $this->get_option('title');
+                $this->description              = $this->get_option('description');
+                $this->instructions             = $this->get_option('instructions');
+                $this->enable_for_methods       = $this->get_option('enable_for_methods', array());
+                $this->enable_for_virtual       = $this->get_option('enable_for_virtual', 'yes') === 'yes';
+                $this->sign                     = $this->get_option('signature', md5(rand(12, 999)));
+                $this->enable_reversal          = $this->get_option('enable_reversal', 'no') === 'yes';
+                $this->enable_c2b               = $this->get_option('enable_c2b', 'no') === 'yes';
+                $this->enable_bonga             = $this->get_option('enable_bonga', 'no') === 'yes';
+                $this->debug                    = $this->get_option('debug', 'no') === 'yes';
+                $this->shortcode                = $this->get_option('shortcode');
+                $this->type                     = $this->get_option('type', 4);
+                $this->env                      = $this->get_option('env', 'sandbox');
+
+                // Verification page settings
+                $this->enable_verification_page = $this->get_option('enable_verification_page', 'yes') === 'yes';
+                $this->verification_timeout     = $this->get_option('verification_timeout', 60);
+                $this->verification_pending_msg = $this->get_option('verification_pending_msg', __('Verifying your payment. Please wait...', 'woocommerce'));
+                $this->verification_success_msg = $this->get_option('verification_success_msg', __('Payment confirmed! Thank you for your purchase.', 'woocommerce'));
+                $this->verification_error_msg   = $this->get_option('verification_error_msg', __('Payment verification failed. Please try again.', 'woocommerce'));
+                $this->verification_redirect_type = $this->get_option('verification_redirect_type', 'default');
+                $this->verification_redirect_page = $this->get_option('verification_redirect_page', '');
+                $this->verification_redirect_url  = $this->get_option('verification_redirect_url', '');
+                $this->verification_resend_delay  = $this->get_option('verification_resend_delay', 20);
+                $this->verification_max_resends   = $this->get_option('verification_max_resends', 3);
 
                 $this->method_description = (($this->env === 'live')
                     ? __('Receive payments via Safaricom M-PESA', 'woocommerce')
@@ -119,6 +131,9 @@ add_action('plugins_loaded', function () {
 
                 add_action('woocommerce_api_lipwa', array($this, 'webhook'));
                 add_action('woocommerce_api_lipwa_receipt', array($this, 'get_transaction_id'));
+                add_action('woocommerce_api_mpesa_verify_payment', array($this, 'ajax_verify_payment'));
+                add_action('woocommerce_api_mpesa_resend_stk', array($this, 'ajax_resend_stk'));
+                add_action('woocommerce_api_mpesa_verification_page', array($this, 'verification_page'));
 
                 $statuses = $this->get_option('statuses', array());
                 foreach ((array) $statuses as $status) {
@@ -149,6 +164,28 @@ add_action('plugins_loaded', function () {
                     'account'    => $this->get_option('account', ''),
                     'signature'  => $this->get_option('signature', md5(rand(12, 999)))
                 );
+            }
+
+            /**
+             * Get WordPress pages for dropdown
+             *
+             * @return array
+             */
+            function get_pages_for_dropdown()
+            {
+                $pages = array('' => __('-- Select Page --', 'woocommerce'));
+
+                $all_pages = get_pages(array(
+                    'sort_column'  => 'post_title',
+                    'sort_order'   => 'ASC',
+                    'post_status'  => 'publish',
+                ));
+
+                foreach ($all_pages as $page) {
+                    $pages[$page->ID] = $page->post_title;
+                }
+
+                return $pages;
             }
 
             function callback_urls_registration_response()
@@ -286,6 +323,106 @@ add_action('plugins_loaded', function () {
                         'description' => __('Instructions that will be added to the thank you page.', 'woocommerce'),
                         'default'     => __('Thank you for shopping with us.', 'woocommerce'),
                         'desc_tip'    => true,
+                    ),
+                    'verification_section' => array(
+                        'title'       => __('Payment Verification Settings', 'woocommerce'),
+                        'description' => __('Customize the payment verification page experience', 'woocommerce'),
+                        'type'        => 'title',
+                    ),
+                    'enable_verification_page' => array(
+                        'title'       => __('Enable Verification Page', 'woocommerce'),
+                        'label'       => __('Enable custom payment verification page', 'woocommerce'),
+                        'type'        => 'checkbox',
+                        'description' => __('Show a custom verification page with spinner and real-time payment status instead of redirecting to standard order received page', 'woocommerce'),
+                        'default'     => 'yes',
+                        'desc_tip'    => true,
+                    ),
+                    'verification_timeout' => array(
+                        'title'       => __('Verification Timeout', 'woocommerce'),
+                        'type'        => 'number',
+                        'description' => __('How long to wait for payment confirmation (in seconds)', 'woocommerce'),
+                        'default'     => '60',
+                        'desc_tip'    => true,
+                        'custom_attributes' => array(
+                            'min'  => '30',
+                            'max'  => '300',
+                            'step' => '10',
+                        ),
+                    ),
+                    'verification_pending_msg' => array(
+                        'title'       => __('Pending Message', 'woocommerce'),
+                        'type'        => 'textarea',
+                        'description' => __('Message shown while verifying payment', 'woocommerce'),
+                        'default'     => __('Verifying your payment. Please wait...', 'woocommerce'),
+                        'desc_tip'    => true,
+                        'css'         => 'height:80px',
+                    ),
+                    'verification_success_msg' => array(
+                        'title'       => __('Success Message', 'woocommerce'),
+                        'type'        => 'textarea',
+                        'description' => __('Message shown when payment is confirmed', 'woocommerce'),
+                        'default'     => __('Payment confirmed! Thank you for your purchase.', 'woocommerce'),
+                        'desc_tip'    => true,
+                        'css'         => 'height:80px',
+                    ),
+                    'verification_error_msg' => array(
+                        'title'       => __('Error Message', 'woocommerce'),
+                        'type'        => 'textarea',
+                        'description' => __('Message shown when payment verification fails', 'woocommerce'),
+                        'default'     => __('Payment verification failed. Please try again.', 'woocommerce'),
+                        'desc_tip'    => true,
+                        'css'         => 'height:80px',
+                    ),
+                    'verification_redirect_type' => array(
+                        'title'       => __('Success Redirect', 'woocommerce'),
+                        'type'        => 'select',
+                        'options'     => array(
+                            'default' => __('Default WooCommerce Order Received Page', 'woocommerce'),
+                            'page'    => __('WordPress Page', 'woocommerce'),
+                            'url'     => __('External URL', 'woocommerce'),
+                        ),
+                        'description' => __('Where to redirect after successful payment verification', 'woocommerce'),
+                        'default'     => 'default',
+                        'desc_tip'    => true,
+                        'class'       => 'select2 wc-enhanced-select',
+                    ),
+                    'verification_redirect_page' => array(
+                        'title'       => __('Redirect Page', 'woocommerce'),
+                        'type'        => 'select',
+                        'options'     => $this->get_pages_for_dropdown(),
+                        'description' => __('Select page to redirect to after successful payment (only if "WordPress Page" is selected above)', 'woocommerce'),
+                        'desc_tip'    => true,
+                        'class'       => 'select2 wc-enhanced-select',
+                    ),
+                    'verification_redirect_url' => array(
+                        'title'       => __('Redirect URL', 'woocommerce'),
+                        'type'        => 'text',
+                        'description' => __('External URL to redirect to after successful payment (only if "External URL" is selected above)', 'woocommerce'),
+                        'placeholder' => 'https://example.com/thank-you',
+                        'desc_tip'    => true,
+                    ),
+                    'verification_resend_delay' => array(
+                        'title'       => __('Resend Button Delay', 'woocommerce'),
+                        'type'        => 'number',
+                        'description' => __('How long to wait before showing the resend button (in seconds)', 'woocommerce'),
+                        'default'     => '20',
+                        'desc_tip'    => true,
+                        'custom_attributes' => array(
+                            'min'  => '10',
+                            'max'  => '120',
+                            'step' => '5',
+                        ),
+                    ),
+                    'verification_max_resends' => array(
+                        'title'       => __('Max Resend Attempts', 'woocommerce'),
+                        'type'        => 'number',
+                        'description' => __('Maximum number of times user can resend STK push', 'woocommerce'),
+                        'default'     => '3',
+                        'desc_tip'    => true,
+                        'custom_attributes' => array(
+                            'min' => '1',
+                            'max' => '5',
+                        ),
                     ),
                     'completion'         => array(
                         'title'       => __('Order Status on Payment', 'woocommerce'),
@@ -574,10 +711,28 @@ add_action('plugins_loaded', function () {
                          */
                         WC()->cart->empty_cart();
 
+                        // Determine redirect URL based on verification page setting
+                        $redirect_url = $this->get_return_url($order);
+
+                        if ($this->enable_verification_page) {
+                            // Redirect to custom verification page
+                            $redirect_url = add_query_arg(array(
+                                'order_id' => $order_id,
+                                'key' => $order->get_order_key()
+                            ), home_url('wc-api/mpesa_verification_page'));
+
+                            // Add order note for tracking
+                            $order->add_order_note(
+                                __('Customer redirected to payment verification page', 'woocommerce')
+                            );
+
+                            error_log("[MPesa Payment] Order #{$order_id} redirecting to verification page. Request ID: {$result['MerchantRequestID']}");
+                        }
+
                         // Return thankyou redirect
                         return array(
                             'result'   => 'success',
-                            'redirect' => $this->get_return_url($order), //$order->get_checkout_payment_url( $on_checkout = false );
+                            'redirect' => $redirect_url,
                         );
                     }
                 } else {
@@ -748,11 +903,15 @@ add_action('plugins_loaded', function () {
                                     $merchantRequestID = $response['Body']['stkCallback']['MerchantRequestID'];
                                     $order_id          = $_GET['order'] ?? wc_mpesa_post_id_by_meta_key_and_value('mpesa_request_id', $merchantRequestID);
 
+                                    // Log reconciliation attempt
+                                    error_log("[MPesa Reconcile] Received callback for Merchant Request ID: {$merchantRequestID}, Order ID: {$order_id}, Result Code: {$resultCode}");
+
                                     if (wc_get_order($order_id)) {
                                         $order     = new \WC_Order($order_id);
                                         $FirstName = $order->get_billing_first_name();
 
                                         if ($order->get_status() === 'completed') {
+                                            error_log("[MPesa Reconcile] Order #{$order_id} already completed. Skipping.");
                                             return;
                                         }
 
@@ -761,6 +920,14 @@ add_action('plugins_loaded', function () {
                                             foreach ($response['Body']['stkCallback']['CallbackMetadata']['Item'] as $item) {
                                                 $parsed[$item['Name']] = $item['Value'];
                                             }
+
+                                            // Log successful payment details
+                                            error_log("[MPesa Reconcile] Payment confirmed for Order #{$order_id}. Phone: {$parsed['PhoneNumber']}, Transaction ID: {$parsed['MpesaReceiptNumber']}, Amount: {$parsed['Amount']}");
+
+                                            // Add detailed order note
+                                            $order->add_order_note(
+                                                __("M-Pesa payment reconciliation successful. Phone: {$parsed['PhoneNumber']}, Amount: {$parsed['Amount']}, Transaction Time: " . date('Y-m-d H:i:s'), 'woocommerce')
+                                            );
 
                                             $order->update_status(
                                                 $this->get_option('completion', 'completed'),
@@ -771,6 +938,14 @@ add_action('plugins_loaded', function () {
 
                                             do_action('send_to_external_api', $order, $parsed, $this->settings);
                                         } else {
+                                            // Log error details
+                                            error_log("[MPesa Reconcile] Payment error for Order #{$order_id}. Code: {$resultCode}, Description: {$resultDesc}");
+
+                                            // Add detailed error note
+                                            $order->add_order_note(
+                                                __("M-Pesa payment failed during reconciliation. Error Code: {$resultCode}, Description: {$resultDesc}, Time: " . date('Y-m-d H:i:s'), 'woocommerce')
+                                            );
+
                                             $order->update_status(
                                                 'on-hold',
                                                 __("(MPesa Error) {$resultCode}: {$resultDesc}.")
@@ -778,8 +953,12 @@ add_action('plugins_loaded', function () {
                                         }
 
                                         return true;
+                                    } else {
+                                        error_log("[MPesa Reconcile] Order not found for Merchant Request ID: {$merchantRequestID}");
                                     }
                                 }
+                            } else {
+                                error_log("[MPesa Reconcile] Invalid signature or missing sign parameter");
                             }
 
                             return false;
@@ -789,6 +968,7 @@ add_action('plugins_loaded', function () {
                     case "confirm":
                         wp_send_json((new STK)->confirm(function ($response = array()) {
                             if (empty($response)) {
+                                error_log("[MPesa C2B Confirm] No response data received");
                                 wp_send_json(
                                     ['Error' => 'No response data received']
                                 );
@@ -805,16 +985,31 @@ add_action('plugins_loaded', function () {
                             $parsed             = compact("Amount", "MpesaReceiptNumber", "TransactionDate", "PhoneNumber");
                             $order_id           = $BillRefNumber ?? wc_mpesa_post_id_by_meta_key_and_value('mpesa_reference', $BillRefNumber);
 
+                            // Log C2B confirmation attempt
+                            error_log("[MPesa C2B Confirm] Received C2B payment. Order ID: {$order_id}, Transaction ID: {$MpesaReceiptNumber}, Amount: {$Amount}, Phone: {$PhoneNumber}");
+
                             if (wc_get_order($order_id)) {
                                 $order       = new \WC_Order($order_id);
                                 $total       = round($order->get_total());
                                 $ipn_balance = $total - round($Amount);
 
                                 if ($order->get_status() === 'completed') {
+                                    error_log("[MPesa C2B Confirm] Order #{$order_id} already completed. Skipping.");
                                     return;
                                 }
 
+                                // Add detailed order note
+                                $order->add_order_note(
+                                    __("C2B payment received. Customer: {$FirstName} {$MiddleName} {$LastName}, Phone: {$PhoneNumber}, Amount: {$Amount}, Transaction Date: {$TransactionDate}", 'woocommerce')
+                                );
+
                                 if ($ipn_balance === 0) {
+                                    error_log("[MPesa C2B Confirm] Order #{$order_id} payment amount matches. Completing order. Expected: {$total}, Received: {$Amount}");
+
+                                    $order->add_order_note(
+                                        __("Payment amount verified: Expected {$total}, Received {$Amount}. Completing order.", 'woocommerce')
+                                    );
+
                                     $order->update_status(
                                         $this->get_option('completion', 'completed'),
                                         __("Full MPesa Payment Received From {$PhoneNumber}. Transaction ID {$MpesaReceiptNumber}")
@@ -826,7 +1021,15 @@ add_action('plugins_loaded', function () {
 
                                     return true;
                                 } elseif ($ipn_balance < 0) {
+                                    $overpayment = abs($ipn_balance);
+                                    error_log("[MPesa C2B Confirm] Order #{$order_id} overpayment detected. Expected: {$total}, Received: {$Amount}, Overpayment: {$overpayment}");
+
                                     $currency = get_woocommerce_currency();
+
+                                    $order->add_order_note(
+                                        __("Overpayment detected: Expected {$total}, Received {$Amount}, Overpayment: {$currency} {$overpayment}", 'woocommerce')
+                                    );
+
                                     $order->update_status(
                                         $this->get_option('completion', 'completed'),
                                         __("{$PhoneNumber} has overpayed by {$currency} {$ipn_balance}. Transaction ID {$MpesaReceiptNumber}")
@@ -838,11 +1041,19 @@ add_action('plugins_loaded', function () {
 
                                     return true;
                                 } else {
+                                    error_log("[MPesa C2B Confirm] Order #{$order_id} underpayment detected. Expected: {$total}, Received: {$Amount}, Shortfall: {$ipn_balance}");
+
+                                    $order->add_order_note(
+                                        __("Underpayment detected: Expected {$total}, Received {$Amount}, Shortfall: {$ipn_balance}. Order placed on hold.", 'woocommerce')
+                                    );
+
                                     $order->update_status(
                                         'on-hold',
                                         __("MPesa Payment from {$PhoneNumber} Incomplete")
                                     );
                                 }
+                            } else {
+                                error_log("[MPesa C2B Confirm] Order #{$order_id} not found for Bill Ref Number: {$BillRefNumber}");
                             }
 
                             return false;
@@ -1031,6 +1242,260 @@ add_action('plugins_loaded', function () {
                         $order->update_status('failed', $response['errorMessage']);
                     }
                 }
+            }
+
+            /**
+             * Serve the payment verification page
+             *
+             * @since 3.1.0
+             */
+            public function verification_page()
+            {
+                // Security check
+                if (empty($_GET['order_id']) || empty($_GET['key'])) {
+                    wp_die(__('Invalid verification link.', 'woocommerce'));
+                }
+
+                $order_id = absint($_GET['order_id']);
+                $order_key = sanitize_text_field($_GET['key']);
+                $order = wc_get_order($order_id);
+
+                if (!$order || !hash_equals($order->get_order_key(), $order_key)) {
+                    wp_die(__('Invalid order or order key.', 'woocommerce'));
+                }
+
+                // Add order note for tracking
+                $order->add_order_note(
+                    __('Customer accessed payment verification page', 'woocommerce')
+                );
+
+                // Load and display the verification template
+                $template_path = plugin_dir_path(__FILE__) . 'templates/mpesa-verification.php';
+
+                if (file_exists($template_path)) {
+                    include $template_path;
+                    exit;
+                } else {
+                    wp_die(__('Verification template not found.', 'woocommerce'));
+                }
+            }
+
+            /**
+             * AJAX endpoint to check payment verification status
+             *
+             * @since 3.1.0
+             */
+            public function ajax_verify_payment()
+            {
+                // Security check
+                if (empty($_GET['order_id']) || empty($_GET['key'])) {
+                    wp_send_json_error(array(
+                        'message' => __('Invalid request parameters.', 'woocommerce')
+                    ));
+                }
+
+                $order_id = absint($_GET['order_id']);
+                $order_key = sanitize_text_field($_GET['key']);
+                $order = wc_get_order($order_id);
+
+                if (!$order || !hash_equals($order->get_order_key(), $order_key)) {
+                    wp_send_json_error(array(
+                        'message' => __('Invalid order or order key.', 'woocommerce')
+                    ));
+                }
+
+                // Check order status
+                $order_status = $order->get_status();
+                $transaction_id = $order->get_transaction_id();
+
+                // Log verification check
+                error_log("[MPesa Verification] Checking payment status for order #{$order_id}, Status: {$order_status}, Transaction ID: {$transaction_id}");
+
+                // Payment completed successfully
+                if (in_array($order_status, array('completed', 'processing'))) {
+                    // Add order note
+                    $order->add_order_note(
+                        __("Payment verification successful. Transaction ID: {$transaction_id}", 'woocommerce')
+                    );
+
+                    // Get redirect URL based on settings
+                    $redirect_url = $this->get_success_redirect_url($order);
+
+                    wp_send_json(array(
+                        'status' => 'success',
+                        'transaction_id' => $transaction_id,
+                        'redirect_url' => $redirect_url,
+                        'message' => $this->verification_success_msg
+                    ));
+                }
+
+                // Check for errors in order notes
+                $notes = wc_get_order_notes(array(
+                    'post_id' => $order_id,
+                    'limit' => 10,
+                ));
+
+                foreach ($notes as $note) {
+                    // Look for error messages
+                    if (strpos($note->content, 'MPesa Error') !== false || strpos($note->content, 'error') !== false) {
+                        // Add order note
+                        $order->add_order_note(
+                            __('Payment verification failed: ' . $note->content, 'woocommerce')
+                        );
+
+                        wp_send_json(array(
+                            'status' => 'error',
+                            'message' => strip_tags($note->content)
+                        ));
+                    }
+                }
+
+                // Payment still pending
+                wp_send_json(array(
+                    'status' => 'pending',
+                    'message' => $this->verification_pending_msg
+                ));
+            }
+
+            /**
+             * AJAX endpoint to resend STK push
+             *
+             * @since 3.1.0
+             */
+            public function ajax_resend_stk()
+            {
+                // Security check
+                if (empty($_GET['order_id']) || empty($_GET['key'])) {
+                    wp_send_json(array(
+                        'success' => false,
+                        'message' => __('Invalid request parameters.', 'woocommerce')
+                    ));
+                }
+
+                $order_id = absint($_GET['order_id']);
+                $order_key = sanitize_text_field($_GET['key']);
+                $order = wc_get_order($order_id);
+
+                if (!$order || !hash_equals($order->get_order_key(), $order_key)) {
+                    wp_send_json(array(
+                        'success' => false,
+                        'message' => __('Invalid order or order key.', 'woocommerce')
+                    ));
+                }
+
+                // Check if already paid
+                if (in_array($order->get_status(), array('completed', 'processing'))) {
+                    wp_send_json(array(
+                        'success' => false,
+                        'message' => __('This order has already been paid.', 'woocommerce')
+                    ));
+                }
+
+                // Get order details
+                $total = $order->get_total();
+                $phone = $order->get_billing_phone();
+                $sign = get_bloginfo('name');
+
+                // Add order note for tracking
+                $order->add_order_note(
+                    __("Customer requested to resend STK push from verification page", 'woocommerce')
+                );
+
+                // Check vendor
+                $this->check_vendor($order);
+
+                // Send STK push
+                $mpesa = new STK;
+                $result = $mpesa->authorize(get_transient('mpesa_token'))
+                    ->request($phone, $total, $order_id, $sign . ' Purchase', 'WCMPesa');
+
+                if ($result && isset($result['MerchantRequestID'])) {
+                    // Update request ID
+                    update_post_meta($order_id, 'mpesa_request_id', $result['MerchantRequestID']);
+
+                    // Add order note
+                    $order->add_order_note(
+                        __("STK push resent successfully. New request ID: {$result['MerchantRequestID']}", 'woocommerce')
+                    );
+
+                    error_log("[MPesa Verification] STK push resent for order #{$order_id}, Request ID: {$result['MerchantRequestID']}");
+
+                    wp_send_json(array(
+                        'success' => true,
+                        'message' => __('Payment request sent! Please check your phone.', 'woocommerce'),
+                        'request_id' => $result['MerchantRequestID']
+                    ));
+                } elseif (isset($result['errorCode'])) {
+                    // Log error
+                    $error_msg = "STK push resend failed: {$result['errorCode']} - {$result['errorMessage']}";
+
+                    $order->add_order_note(
+                        __($error_msg, 'woocommerce')
+                    );
+
+                    error_log("[MPesa Verification] {$error_msg}");
+
+                    wp_send_json(array(
+                        'success' => false,
+                        'message' => __("Error: {$result['errorMessage']}", 'woocommerce')
+                    ));
+                } else {
+                    // Generic failure
+                    $order->add_order_note(
+                        __('STK push resend failed: Could not connect to M-Pesa', 'woocommerce')
+                    );
+
+                    error_log("[MPesa Verification] STK push resend failed for order #{$order_id}: Could not connect to M-Pesa");
+
+                    wp_send_json(array(
+                        'success' => false,
+                        'message' => __('Failed to send payment request. Please try again.', 'woocommerce')
+                    ));
+                }
+            }
+
+            /**
+             * Get success redirect URL based on settings
+             *
+             * @since 3.1.0
+             * @param WC_Order $order
+             * @return string
+             */
+            private function get_success_redirect_url($order)
+            {
+                $redirect_type = $this->verification_redirect_type;
+
+                switch ($redirect_type) {
+                    case 'page':
+                        $page_id = $this->verification_redirect_page;
+                        if ($page_id) {
+                            // Add order ID as query parameter
+                            return add_query_arg(array(
+                                'order_id' => $order->get_id(),
+                                'key' => $order->get_order_key()
+                            ), get_permalink($page_id));
+                        }
+                        break;
+
+                    case 'url':
+                        $url = $this->verification_redirect_url;
+                        if ($url) {
+                            // Add order ID as query parameter
+                            return add_query_arg(array(
+                                'order_id' => $order->get_id(),
+                                'key' => $order->get_order_key()
+                            ), $url);
+                        }
+                        break;
+
+                    case 'default':
+                    default:
+                        // Use standard WooCommerce order received page
+                        return $this->get_return_url($order);
+                }
+
+                // Fallback to default
+                return $this->get_return_url($order);
             }
         }
     }
