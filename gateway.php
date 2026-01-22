@@ -107,16 +107,18 @@ add_action('plugins_loaded', function () {
                 $this->env                      = $this->get_option('env', 'sandbox');
 
                 // Verification page settings
-                $this->enable_verification_page = $this->get_option('enable_verification_page', 'yes') === 'yes';
-                $this->verification_timeout     = $this->get_option('verification_timeout', 60);
-                $this->verification_pending_msg = $this->get_option('verification_pending_msg', __('Verifying your payment. Please wait...', 'woocommerce'));
-                $this->verification_success_msg = $this->get_option('verification_success_msg', __('Payment confirmed! Thank you for your purchase.', 'woocommerce'));
-                $this->verification_error_msg   = $this->get_option('verification_error_msg', __('Payment verification failed. Please try again.', 'woocommerce'));
+                $this->enable_verification_page   = $this->get_option('enable_verification_page', 'yes') === 'yes';
+                $this->verification_timeout       = $this->get_option('verification_timeout', 60);
+                $this->verification_pending_msg   = $this->get_option('verification_pending_msg', __('Verifying your payment. Please wait...', 'woocommerce'));
+                $this->verification_success_msg   = $this->get_option('verification_success_msg', __('Payment confirmed! Thank you for your purchase.', 'woocommerce'));
+                $this->verification_error_msg     = $this->get_option('verification_error_msg', __('Payment verification failed. Please try again.', 'woocommerce'));
                 $this->verification_redirect_type = $this->get_option('verification_redirect_type', 'default');
                 $this->verification_redirect_page = $this->get_option('verification_redirect_page', '');
                 $this->verification_redirect_url  = $this->get_option('verification_redirect_url', '');
                 $this->verification_resend_delay  = $this->get_option('verification_resend_delay', 20);
                 $this->verification_max_resends   = $this->get_option('verification_max_resends', 3);
+                $this->verification_bg_color      = $this->get_option('verification_bg_color', '#667eea');
+                $this->verification_inherit_theme = $this->get_option('verification_inherit_theme', 'no') === 'yes';
 
                 $this->method_description = (($this->env === 'live')
                     ? __('Receive payments via Safaricom M-PESA', 'woocommerce')
@@ -145,6 +147,7 @@ add_action('plugins_loaded', function () {
 
                 add_action('admin_notices', array($this, 'callback_urls_registration_response'));
                 add_action('woocommerce_update_options_payment_gateways_' . $this->id, array($this, 'process_admin_options'));
+                add_action('admin_enqueue_scripts', array($this, 'admin_scripts'));
 
                 add_filter('wc_mpesa_settings', array($this, 'set_default_options'), 1, 1);
             }
@@ -196,6 +199,35 @@ add_action('plugins_loaded', function () {
                             <p>' . $_GET['mpesa-urls-registered'] . '</p>
                         </div>'
                     : '';
+            }
+
+            /**
+             * Enqueue admin scripts and styles
+             *
+             * @since 3.1.0
+             */
+            function admin_scripts($hook)
+            {
+                // Only load on WooCommerce settings page
+                if ('woocommerce_page_wc-settings' !== $hook) {
+                    return;
+                }
+
+                // Only load if we're on the payment gateway settings
+                if (!isset($_GET['section']) || $_GET['section'] !== $this->id) {
+                    return;
+                }
+
+                // Enqueue WordPress color picker
+                wp_enqueue_style('wp-color-picker');
+                wp_enqueue_script('wp-color-picker');
+
+                // Add inline script to initialize color picker
+                wp_add_inline_script('wp-color-picker', '
+                    jQuery(document).ready(function($) {
+                        $("#woocommerce_mpesa_verification_bg_color").wpColorPicker();
+                    });
+                ');
             }
 
             /**
@@ -423,6 +455,30 @@ add_action('plugins_loaded', function () {
                             'min' => '1',
                             'max' => '5',
                         ),
+                    ),
+                    'verification_styling_section' => array(
+                        'title'       => __('Verification Page Styling', 'woocommerce'),
+                        'description' => __('Customize the appearance of the payment verification page', 'woocommerce'),
+                        'type'        => 'title',
+                    ),
+                    'verification_bg_color' => array(
+                        'title'       => __('Background Color', 'woocommerce'),
+                        'type'        => 'text',
+                        'description' => __('Background gradient color for the verification page. Use hex color code (e.g., #667eea)', 'woocommerce'),
+                        'default'     => '#667eea',
+                        'desc_tip'    => true,
+                        'class'       => 'colorpick',
+                        'custom_attributes' => array(
+                            'pattern' => '^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$',
+                        ),
+                    ),
+                    'verification_inherit_theme' => array(
+                        'title'       => __('Inherit Theme Styles', 'woocommerce'),
+                        'label'       => __('Use theme fonts and base styles', 'woocommerce'),
+                        'type'        => 'checkbox',
+                        'description' => __('Load WordPress theme styles on the verification page. This will use your theme\'s fonts and colors while maintaining the verification page layout.', 'woocommerce'),
+                        'default'     => 'no',
+                        'desc_tip'    => true,
                     ),
                     'completion'         => array(
                         'title'       => __('Order Status on Payment', 'woocommerce'),

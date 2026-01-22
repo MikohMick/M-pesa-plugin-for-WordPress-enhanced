@@ -41,9 +41,27 @@ $success_msg = esc_html($gateway->verification_success_msg);
 $error_msg = esc_html($gateway->verification_error_msg);
 $resend_delay = absint($gateway->verification_resend_delay);
 $max_resends = absint($gateway->verification_max_resends);
+$bg_color = esc_attr($gateway->verification_bg_color);
+$inherit_theme = $gateway->verification_inherit_theme;
 
 // Get site name
 $site_name = get_bloginfo('name');
+
+// Calculate complementary gradient color (darker shade)
+$bg_color_dark = $bg_color;
+if (preg_match('/^#([A-Fa-f0-9]{6})$/', $bg_color, $matches)) {
+    $hex = $matches[1];
+    $r = hexdec(substr($hex, 0, 2));
+    $g = hexdec(substr($hex, 2, 2));
+    $b = hexdec(substr($hex, 4, 2));
+
+    // Darken by 20%
+    $r = max(0, min(255, $r * 0.8));
+    $g = max(0, min(255, $g * 0.8));
+    $b = max(0, min(255, $b * 0.8));
+
+    $bg_color_dark = sprintf('#%02x%02x%02x', $r, $g, $b);
+}
 
 ?>
 <!DOCTYPE html>
@@ -54,6 +72,10 @@ $site_name = get_bloginfo('name');
     <meta name="robots" content="noindex, nofollow">
     <title><?php echo esc_html__('Payment Verification', 'woocommerce') . ' - ' . esc_html($site_name); ?></title>
 
+    <?php if ($inherit_theme): ?>
+        <?php wp_head(); ?>
+    <?php endif; ?>
+
     <style>
         * {
             margin: 0;
@@ -62,8 +84,10 @@ $site_name = get_bloginfo('name');
         }
 
         body {
+            <?php if (!$inherit_theme): ?>
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen-Sans, Ubuntu, Cantarell, "Helvetica Neue", sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            <?php endif; ?>
+            background: linear-gradient(135deg, <?php echo $bg_color; ?> 0%, <?php echo $bg_color_dark; ?> 100%);
             min-height: 100vh;
             display: flex;
             align-items: center;
@@ -81,6 +105,10 @@ $site_name = get_bloginfo('name');
             text-align: center;
             position: relative;
             overflow: hidden;
+            <?php if ($inherit_theme): ?>
+            /* Allow theme styles to influence container */
+            color: inherit;
+            <?php endif; ?>
         }
 
         .logo {
@@ -633,5 +661,9 @@ $site_name = get_bloginfo('name');
             stopPolling();
         });
     </script>
+
+    <?php if ($inherit_theme): ?>
+        <?php wp_footer(); ?>
+    <?php endif; ?>
 </body>
 </html>
