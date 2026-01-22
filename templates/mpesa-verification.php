@@ -92,7 +92,7 @@ if (preg_match('/^#([A-Fa-f0-9]{6})$/', $bg_color, $matches)) {
             display: flex;
             align-items: center;
             justify-content: center;
-            padding: 20px;
+            padding: 30px 20px;
         }
 
         .verification-container {
@@ -300,8 +300,13 @@ if (preg_match('/^#([A-Fa-f0-9]{6})$/', $bg_color, $matches)) {
 
         /* Mobile responsive */
         @media (max-width: 600px) {
+            body {
+                padding: 24px 16px;
+            }
+
             .verification-container {
-                padding: 30px 20px;
+                padding: 32px 24px;
+                border-radius: 12px;
             }
 
             .status-message {
@@ -323,6 +328,42 @@ if (preg_match('/^#([A-Fa-f0-9]{6})$/', $bg_color, $matches)) {
             .success-icon::before,
             .error-icon::before {
                 font-size: 48px;
+            }
+
+            .resend-button {
+                padding: 12px 24px;
+                font-size: 15px;
+            }
+        }
+
+        /* Extra small mobile devices */
+        @media (max-width: 400px) {
+            body {
+                padding: 20px 12px;
+            }
+
+            .verification-container {
+                padding: 28px 20px;
+                border-radius: 10px;
+            }
+
+            .logo img {
+                max-width: 120px;
+            }
+
+            .status-message {
+                font-size: 15px;
+            }
+
+            .phone-reminder,
+            .timer {
+                font-size: 13px;
+            }
+
+            .resend-button {
+                padding: 12px 20px;
+                font-size: 14px;
+                width: 100%;
             }
         }
     </style>
